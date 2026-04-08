@@ -1,0 +1,6 @@
+{
+  "model": "gpt-4o-mini-transcribe",
+  "language": "fr",
+  "response_format": "json",
+  "prompt": "Transcription en francais pour un champ de pitch startup. Conserver une ponctuation claire sans inventer de contenu."
+}
