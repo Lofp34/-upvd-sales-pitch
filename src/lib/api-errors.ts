@@ -136,5 +136,17 @@ export function toApiErrorResponse(
     );
   }
 
+  if (
+    status &&
+    status >= 400 &&
+    status < 500 &&
+    message &&
+    (code?.startsWith("unsupported_audio_format") ||
+      code === "audio_duration_too_long" ||
+      code === "audio_file_too_large")
+  ) {
+    return NextResponse.json({ message }, { status });
+  }
+
   return NextResponse.json({ message: fallbackMessage }, { status: 500 });
 }

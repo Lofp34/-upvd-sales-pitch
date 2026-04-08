@@ -6,6 +6,10 @@ import { LoaderCircle, Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { readResponsePayload } from "@/lib/http";
 import {
+  getAudioFileExtension,
+  normalizeAudioMimeType,
+} from "@/lib/audio-formats";
+import {
   MAX_AUDIO_UPLOAD_BYTES,
   MAX_RECORDING_SECONDS,
 } from "@/lib/pitch/config";
@@ -21,6 +25,9 @@ type VoiceDictationButtonProps = {
 const MIME_TYPE_CANDIDATES = [
   "audio/webm;codecs=opus",
   "audio/webm",
+  "audio/mp4;codecs=mp4a.40.2",
+  "audio/mp4",
+  "video/mp4",
 ];
 
 function getSupportedMimeType() {
@@ -172,10 +179,15 @@ export function VoiceDictationButton({
     setStatus("transcribing");
 
     try {
-      const extension = audioBlob.type.includes("wav") ? "wav" : "webm";
-      const audioFile = new File([audioBlob], `pitch-${Date.now()}.${extension}`, {
-        type: audioBlob.type || "audio/webm",
-      });
+      const audioMimeType = normalizeAudioMimeType(audioBlob.type) || "audio/webm";
+      const extension = getAudioFileExtension(audioMimeType) ?? "webm";
+      const audioFile = new File(
+        [audioBlob],
+        `pitch-${Date.now()}.${extension}`,
+        {
+          type: audioMimeType,
+        },
+      );
       const formData = new FormData();
 
       formData.set("file", audioFile);

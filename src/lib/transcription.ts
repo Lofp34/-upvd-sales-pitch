@@ -1,20 +1,32 @@
 import OpenAI from "openai";
 
+import {
+  isSupportedAudioMimeType,
+  normalizeAudioMimeType,
+} from "@/lib/audio-formats";
 import { assertOpenAiApiKey } from "@/lib/env";
 import {
   MAX_AUDIO_UPLOAD_BYTES,
   MAX_RECORDING_SECONDS,
 } from "@/lib/pitch/config";
 
-const ALLOWED_AUDIO_TYPES = new Set([
-  "audio/mp3",
-  "audio/mpeg",
-  "audio/mp4",
-  "audio/mpga",
-  "audio/m4a",
-  "audio/wav",
-  "audio/webm",
-]);
+type TranscriptionInputError = Error & {
+  code?: string;
+  status?: number;
+};
+
+function createTranscriptionInputError(
+  message: string,
+  status: number,
+  code: string,
+) {
+  const error = new Error(message) as TranscriptionInputError;
+
+  error.status = status;
+  error.code = code;
+
+  return error;
+}
 
 function getClient() {
   return new OpenAI({
@@ -24,14 +36,21 @@ function getClient() {
 
 export function assertAudioFileIsSupported(file: File) {
   if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
-    throw new Error(
+    throw createTranscriptionInputError(
       "Le fichier audio est trop lourd. Garde un enregistrement court ou redemarre une nouvelle dictee.",
+      413,
+      "audio_file_too_large",
     );
   }
 
-  if (!ALLOWED_AUDIO_TYPES.has(file.type)) {
-    throw new Error(
+  if (!isSupportedAudioMimeType(file.type)) {
+    const normalizedType = normalizeAudioMimeType(file.type);
+    const formatLabel = normalizedType || file.type || "inconnu";
+
+    throw createTranscriptionInputError(
       "Format audio non pris en charge. Utilise un enregistrement webm, wav, mp3, mp4 ou m4a.",
+      400,
+      `unsupported_audio_format:${formatLabel}`,
     );
   }
 }
@@ -42,8 +61,10 @@ export function assertDurationIsSupported(durationSeconds?: number) {
   }
 
   if (durationSeconds > MAX_RECORDING_SECONDS) {
-    throw new Error(
+    throw createTranscriptionInputError(
       "La dictee est trop longue pour ce mode. Garde chaque prise sous 5 minutes.",
+      400,
+      "audio_duration_too_long",
     );
   }
 }
