@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 type ErrorWithCode = {
   code?: string;
   message?: string;
+  status?: number;
+  type?: string;
 };
 
 function getErrorCode(error: unknown) {
@@ -29,6 +31,26 @@ function getErrorMessage(error: unknown) {
   return "";
 }
 
+function getErrorStatus(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const status = (error as ErrorWithCode).status;
+
+  return typeof status === "number" ? status : undefined;
+}
+
+function getErrorType(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const type = (error as ErrorWithCode).type;
+
+  return typeof type === "string" ? type : undefined;
+}
+
 export function toApiErrorResponse(
   error: unknown,
   fallbackMessage: string,
@@ -38,6 +60,8 @@ export function toApiErrorResponse(
 
   const code = getErrorCode(error);
   const message = getErrorMessage(error);
+  const status = getErrorStatus(error);
+  const type = getErrorType(error);
   const lowerMessage = message.toLowerCase();
 
   if (
@@ -85,6 +109,30 @@ export function toApiErrorResponse(
           "Cle OpenAI absente cote serveur. Ajoute OPENAI_API_KEY dans Vercel.",
       },
       { status: 500 },
+    );
+  }
+
+  if (
+    code === "invalid_api_key" ||
+    status === 401 ||
+    type === "invalid_request_error" && lowerMessage.includes("incorrect api key")
+  ) {
+    return NextResponse.json(
+      {
+        message:
+          "Cle OpenAI invalide ou expiree cote serveur. Remplace OPENAI_API_KEY dans Vercel puis redeploie.",
+      },
+      { status: 500 },
+    );
+  }
+
+  if (status === 429 || lowerMessage.includes("rate limit")) {
+    return NextResponse.json(
+      {
+        message:
+          "Limite OpenAI atteinte temporairement. Attends un peu puis reessaie.",
+      },
+      { status: 429 },
     );
   }
 
