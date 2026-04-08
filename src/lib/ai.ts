@@ -14,6 +14,12 @@ const ACTION_PROMPTS: Record<
   AiAction,
   { instruction: string; outputShape: string }
 > = {
+  generate_pitch: {
+    instruction:
+      "Redige un pitch commercial d'une minute maximum a partir des informations fournies. Structure imperative : d'abord les enjeux clients, ensuite les forces mobilisees, puis les benefices obtenus.",
+    outputShape:
+      "Retourne un seul pitch commercial en 3 paragraphes courts, sans titre ni puces, a la premiere personne du pluriel, directement reutilisable.",
+  },
   clarify: {
     instruction:
       "Reformule pour rendre le texte plus clair, plus concret et plus professionnel, sans allonger inutilement.",
@@ -50,6 +56,16 @@ const ACTION_PROMPTS: Record<
   },
 };
 
+const PITCH_REFERENCE_EXAMPLE = [
+  "J'accompagne des PME qui ont de bons fondamentaux, mais pas de vrai systeme commercial.",
+  "Resultat : des ventes en dents de scie, des tensions entre commerce et production, un pilotage complique, et parfois de l'insatisfaction client.",
+  "",
+  "Mon travail, c'est de transformer ce desordre en systeme commercial structure, pilotable et efficace.",
+  "Je realise un audit approfondi avec les commerciaux et les personnes qui travaillent avec eux, je formalise les points forts de l'entreprise, je structure les axes de progres avec les bonnes techniques de vente et de management, et je mets en place des agents d'IA qui assistent concretement les commerciaux au quotidien.",
+  "",
+  "Le resultat, c'est un systeme commercial plus clair, plus maitrise, plus efficace, avec plus d'autonomie pour l'equipe et des resultats concrets : regulierement +25 a +30 %, et jusqu'a x10 chez Septeo.",
+].join("\n");
+
 function getClient() {
   return new OpenAI({
     apiKey: assertOpenAiApiKey(),
@@ -63,11 +79,38 @@ export async function assistWithAi({
   context = {},
 }: AssistInput) {
   const configuration = ACTION_PROMPTS[action];
+  const isPitchGeneration = action === "generate_pitch";
+  const isPitchField = context.fieldLabel === "Pitch commercial 1 minute max";
 
   const contextBlock = Object.entries(context)
     .filter(([, value]) => Boolean(value))
     .map(([key, value]) => `- ${key}: ${value}`)
     .join("\n");
+
+  const systemInstructions = isPitchGeneration
+    ? [
+        "Tu es un coach commercial et redacteur pour jeunes startupers francophones.",
+        "Quand on te demande de generer un pitch, tu le rediges toi-meme a partir des blocs fournis.",
+        "Interdictions absolues : inventer des faits, des chiffres, des clients, des promesses ou des preuves non presentes dans la source.",
+        "Si une information manque, tu restes sobre et tu n'inventes rien.",
+        "Ton style doit rester concret, credible, fluide, terrain et naturel a l'oral.",
+        "Le pitch doit toujours suivre cette logique : enjeux clients d'abord, forces mobilisees ensuite, benefices clients a la fin.",
+        "Le pitch doit tenir en une minute maximum.",
+      ]
+    : [
+        "Tu es un coach de vente pour jeunes startupers francophones.",
+        "Tu aides a clarifier, raccourcir ou oraliser un texte, mais tu ne fais jamais l'exercice a la place de l'apprenant.",
+        "Interdictions absolues : inventer des faits, combler des blancs, ajouter des promesses non presentes, changer le sens du propos.",
+        "Si l'information manque, tu le signales dans la reponse au lieu d'inventer.",
+        "Ton style doit rester simple, concret, professionnel et naturel a l'oral.",
+      ];
+
+  if (isPitchField && !isPitchGeneration) {
+    systemInstructions.push(
+      "Si le texte travaille un pitch commercial, conserve la logique enjeux clients -> forces -> benefices.",
+      "Reste dans un format fluide, directement prononcable, sans puces ni titre.",
+    );
+  }
 
   const response = await getClient().responses.create({
     model: "gpt-5.4",
@@ -83,13 +126,7 @@ export async function assistWithAi({
         content: [
           {
             type: "input_text",
-            text: [
-              "Tu es un coach de vente pour jeunes startupers francophones.",
-              "Tu aides a clarifier, raccourcir ou oraliser un texte, mais tu ne fais jamais l'exercice a la place de l'apprenant.",
-              "Interdictions absolues : inventer des faits, combler des blancs, ajouter des promesses non presentes, changer le sens du propos.",
-              "Si l'information manque, tu le signales dans la reponse au lieu d'inventer.",
-              "Ton style doit rester simple, concret, professionnel et naturel a l'oral.",
-            ].join(" "),
+            text: systemInstructions.join(" "),
           },
         ],
       },
@@ -103,9 +140,14 @@ export async function assistWithAi({
               contextBlock ? `Contexte:\n${contextBlock}` : "Contexte: aucun",
               `Instruction: ${configuration.instruction}`,
               `Format attendu: ${configuration.outputShape}`,
+              isPitchGeneration
+                ? `Exemple de ton et de structure a suivre:\n${PITCH_REFERENCE_EXAMPLE}`
+                : null,
               "Texte source:",
               sourceText.trim(),
-            ].join("\n\n"),
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           },
         ],
       },

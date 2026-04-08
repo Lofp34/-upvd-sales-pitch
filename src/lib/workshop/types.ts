@@ -1,4 +1,5 @@
 export const AI_ACTIONS = [
+  "generate_pitch",
   "clarify",
   "shorten",
   "variants_3",

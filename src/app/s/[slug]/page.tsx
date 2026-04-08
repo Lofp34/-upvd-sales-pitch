@@ -66,9 +66,9 @@ export default async function SessionJoinPage({
             Entre dans l&apos;atelier et travaille ton pitch.
           </h1>
           <p className="max-w-2xl text-base leading-8 text-muted-foreground">
-            L&apos;outil te permet de formuler ta valeur ajoutee, d&apos;ecrire
-            ton pitch court, de preparer ta version orale et de saisir tes
-            idees a la voix.
+            L&apos;outil te permet de clarifier ce que vous apportez, les enjeux
+            reels de vos interlocuteurs, puis de generer un pitch commercial
+            d&apos;une minute avec assistance IA et saisie vocale.
           </p>
         </div>
 

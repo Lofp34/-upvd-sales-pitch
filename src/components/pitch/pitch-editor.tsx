@@ -12,8 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { readResponsePayload } from "@/lib/http";
 import {
+  PITCH_CLIENT_ISSUES_FIELD_ID,
+  PITCH_COMMERCIAL_FIELD_ID,
   PITCH_FIELDS,
   PITCH_RAIL_BULLETS,
+  PITCH_STRENGTHS_FIELD_ID,
   PITCH_STEP_ID,
 } from "@/lib/pitch/config";
 import type { AiAction, AnswersState, WorkshopField } from "@/lib/workshop/types";
@@ -67,6 +70,57 @@ function getFieldStorageId(stepId: string, fieldId: string) {
   return `${stepId}:${fieldId}`;
 }
 
+function joinAnswerBlocks(...values: Array<string | undefined>) {
+  return values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n");
+}
+
+function getStepFieldValue(
+  stepAnswers: Record<string, string>,
+  fieldId: string,
+) {
+  if (fieldId === PITCH_STRENGTHS_FIELD_ID) {
+    return (
+      stepAnswers[PITCH_STRENGTHS_FIELD_ID] ??
+      joinAnswerBlocks(stepAnswers.valueResponse, stepAnswers.valueMethod)
+    );
+  }
+
+  if (fieldId === PITCH_COMMERCIAL_FIELD_ID) {
+    return (
+      stepAnswers[PITCH_COMMERCIAL_FIELD_ID] ??
+      stepAnswers.pitch60 ??
+      stepAnswers.pitch30 ??
+      ""
+    );
+  }
+
+  return stepAnswers[fieldId] ?? "";
+}
+
+function getAiActionLabel(action: AiAction) {
+  switch (action) {
+    case "generate_pitch":
+      return "Generer le pitch";
+    case "clarify":
+      return "Clarifier";
+    case "shorten":
+      return "Raccourcir";
+    case "variants_3":
+      return "3 variantes";
+    case "flag_vagueness":
+      return "Repérer le flou";
+    case "oralize_30s":
+      return "Version orale 30s";
+    case "oralize_60s":
+      return "Version orale 1 min";
+    default:
+      return action;
+  }
+}
+
 export function PitchEditor({
   session,
   workbook,
@@ -87,8 +141,23 @@ export function PitchEditor({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stepAnswers = answers[PITCH_STEP_ID] ?? {};
-  const shortPitch = stepAnswers.pitch30?.trim() || "";
-  const longPitch = stepAnswers.pitch60?.trim() || "";
+  const strengthsText = getStepFieldValue(
+    stepAnswers,
+    PITCH_STRENGTHS_FIELD_ID,
+  ).trim();
+  const clientIssuesText = getStepFieldValue(
+    stepAnswers,
+    PITCH_CLIENT_ISSUES_FIELD_ID,
+  ).trim();
+  const commercialPitch = getStepFieldValue(
+    stepAnswers,
+    PITCH_COMMERCIAL_FIELD_ID,
+  ).trim();
+  const inputFields = PITCH_FIELDS.filter(
+    (field) => field.id !== PITCH_COMMERCIAL_FIELD_ID,
+  );
+  const pitchField =
+    PITCH_FIELDS.find((field) => field.id === PITCH_COMMERCIAL_FIELD_ID) ?? null;
 
   useEffect(() => {
     const raw = window.localStorage.getItem(storageKey);
@@ -191,7 +260,7 @@ export function PitchEditor({
   }
 
   function appendTranscript(fieldId: string, transcript: string) {
-    const existingText = stepAnswers[fieldId]?.trim();
+    const existingText = getStepFieldValue(stepAnswers, fieldId).trim();
     const nextValue = existingText
       ? `${existingText}\n\n${transcript.trim()}`
       : transcript.trim();
@@ -200,17 +269,66 @@ export function PitchEditor({
     setSaveMessage("Transcription ajoutee au champ.");
   }
 
-  async function runAiAssist(field: WorkshopField, action: AiAction) {
-    const fieldKey = getFieldStorageId(PITCH_STEP_ID, field.id);
-    const sourceText = stepAnswers[field.id] ?? "";
+  function buildAssistPayload(field: WorkshopField, action: AiAction) {
+    const context = {
+      startup: workbook.startup,
+      participant: workbook.name,
+      stepTitle: "Pitch commercial startup",
+      fieldLabel: field.label,
+      fieldHelper: field.helper,
+      sessionTitle: session.title,
+    };
+
+    if (action === "generate_pitch") {
+      if (!strengthsText || !clientIssuesText) {
+        return {
+          error:
+            "Renseigne d'abord le bloc sur vos forces et celui sur les enjeux reels de vos interlocuteurs.",
+        };
+      }
+
+      return {
+        sourceText: [
+          `Bloc 1 - Ce que vous apportez, vos forces :\n${strengthsText}`,
+          `Bloc 2 - Enjeux reels de vos interlocuteurs :\n${clientIssuesText}`,
+          commercialPitch
+            ? `Brouillon actuel du pitch :\n${commercialPitch}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        context: {
+          ...context,
+          pitchStructure: "enjeux clients -> forces -> benefices clients",
+        },
+      };
+    }
+
+    const sourceText = getStepFieldValue(stepAnswers, field.id);
 
     if (!sourceText.trim()) {
+      return {
+        error: "Commence par ecrire une base de texte dans ce champ.",
+      };
+    }
+
+    return {
+      sourceText,
+      context,
+    };
+  }
+
+  async function runAiAssist(field: WorkshopField, action: AiAction) {
+    const fieldKey = getFieldStorageId(PITCH_STEP_ID, field.id);
+    const assistPayload = buildAssistPayload(field, action);
+
+    if ("error" in assistPayload) {
       setAssistStates((previous) => ({
         ...previous,
         [fieldKey]: {
           loading: false,
           action,
-          error: "Commence par ecrire une base de texte dans ce champ.",
+          error: assistPayload.error,
         },
       }));
       return;
@@ -234,14 +352,8 @@ export function PitchEditor({
           workbookId: workbook.id,
           stepId: PITCH_STEP_ID,
           action,
-          sourceText,
-          context: {
-            startup: workbook.startup,
-            participant: workbook.name,
-            stepTitle: "Pitch startup",
-            fieldLabel: field.label,
-            sessionTitle: session.title,
-          },
+          sourceText: assistPayload.sourceText,
+          context: assistPayload.context,
         }),
       });
 
@@ -292,6 +404,116 @@ export function PitchEditor({
     setSaveMessage(`${label} copie.`);
   }
 
+  function renderField(
+    field: WorkshopField,
+    options?: {
+      alignActionsRight?: boolean;
+    },
+  ) {
+    const fieldValue = getStepFieldValue(stepAnswers, field.id);
+    const fieldKey = getFieldStorageId(PITCH_STEP_ID, field.id);
+    const assistState = assistStates[fieldKey];
+
+    return (
+      <article
+        className="rounded-[1.75rem] border border-border/80 bg-background/75 p-5"
+        key={fieldKey}
+      >
+        <div className="space-y-2">
+          <Label
+            className="text-base font-medium text-foreground"
+            htmlFor={fieldKey}
+          >
+            {field.label}
+          </Label>
+          {field.helper ? (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {field.helper}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mt-4">
+          <Textarea
+            id={fieldKey}
+            onChange={(event) => updateField(field.id, event.target.value)}
+            placeholder={field.placeholder}
+            rows={field.rows ?? 5}
+            value={fieldValue}
+          />
+        </div>
+
+        <div className="mt-4">
+          <VoiceDictationButton
+            currentText={fieldValue}
+            fieldId={field.id}
+            fieldLabel={field.label}
+            onTranscript={(text) => appendTranscript(field.id, text)}
+            workbookId={workbook.id}
+          />
+        </div>
+
+        {field.aiActions?.length ? (
+          <div
+            className={`mt-4 flex flex-wrap gap-2 ${
+              options?.alignActionsRight ? "justify-end" : ""
+            }`}
+          >
+            {field.aiActions.map((action) => (
+              <Button
+                className="rounded-full"
+                disabled={assistState?.loading}
+                key={action}
+                onClick={() => runAiAssist(field, action)}
+                size="sm"
+                type="button"
+                variant={action === "generate_pitch" ? "default" : "outline"}
+              >
+                {getAiActionLabel(action)}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+
+        {assistState?.output ? (
+          <div className="mt-4 rounded-3xl border border-primary/15 bg-primary/5 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-primary/70">
+              Suggestion IA
+            </p>
+            <div className="mt-2 text-sm leading-7 text-foreground [overflow-wrap:anywhere] [&_a]:font-medium [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:rounded-md [&_code]:bg-background/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[0.92em] [&_em]:italic [&_h1]:mt-5 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:text-primary [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-primary [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:font-semibold [&_h3]:text-primary [&_h3:first-child]:mt-0 [&_li]:ml-1 [&_li]:pl-1 [&_ol]:mt-3 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5 [&_p]:mt-3 [&_p:first-child]:mt-0 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:bg-background/85 [&_pre]:p-4 [&_pre]:text-xs [&_strong]:font-semibold [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {assistState.output}
+              </ReactMarkdown>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                className="rounded-full"
+                onClick={() => updateField(field.id, assistState.output ?? "")}
+                size="sm"
+                type="button"
+              >
+                Remplacer mon texte
+              </Button>
+              <Button
+                className="rounded-full"
+                onClick={() => copySuggestion(assistState.output ?? "")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Copier la suggestion
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {assistState?.error ? (
+          <p className="mt-3 text-sm text-destructive">{assistState.error}</p>
+        ) : null}
+      </article>
+    );
+  }
+
   return (
     <main className="editorial-shell soft-grid">
       <div className="mx-auto flex min-h-screen w-full max-w-[1560px] flex-col gap-6 px-4 py-4 md:px-6 lg:px-8">
@@ -314,12 +536,13 @@ export function PitchEditor({
                   {session.title}
                 </p>
                 <h1 className="editorial-title text-4xl text-primary md:text-5xl">
-                  Rédige ton pitch startup
+                  Redige ton pitch commercial
                 </h1>
                 <p className="max-w-3xl text-base leading-7 text-muted-foreground">
-                  Travaille ta proposition de valeur, ta version 30 secondes et
-                  ta version 1 minute dans un seul espace, avec assistance IA et
-                  dictee vocale.
+                  Commence par tes forces et differentiations, puis precise les
+                  enjeux reels de tes interlocuteurs. L&apos;IA te proposera
+                  ensuite un pitch commercial d&apos;une minute maximum, que tu
+                  pourras retravailler.
                 </p>
               </div>
             </div>
@@ -341,128 +564,22 @@ export function PitchEditor({
             <Card className="editorial-card rounded-[2rem]">
               <CardHeader className="space-y-3">
                 <CardTitle className="editorial-title text-3xl text-primary">
-                  Valeur ajoutee et pitch
+                  Forces, enjeux et pitch commercial
                 </CardTitle>
                 <p className="max-w-3xl text-sm leading-7 text-muted-foreground">
-                  D&apos;abord l&apos;enjeu, ensuite la reponse, puis le benefice.
-                  Le pitch court doit donner envie d&apos;aller plus loin, pas
-                  tout raconter.
+                  Renseigne d&apos;abord ce que vous apportez, puis les enjeux
+                  de haut niveau de vos interlocuteurs. Le pitch final doit
+                  parler d&apos;abord de leurs enjeux, ensuite de vos forces, et
+                  finir sur les benefices concrets.
                 </p>
               </CardHeader>
               <CardContent className="space-y-6">
-                {PITCH_FIELDS.map((field) => {
-                  const fieldValue = stepAnswers[field.id] ?? "";
-                  const fieldKey = getFieldStorageId(PITCH_STEP_ID, field.id);
-                  const assistState = assistStates[fieldKey];
-
-                  return (
-                    <article
-                      className="rounded-[1.75rem] border border-border/80 bg-background/75 p-5"
-                      key={fieldKey}
-                    >
-                      <div className="space-y-2">
-                        <Label
-                          className="text-base font-medium text-foreground"
-                          htmlFor={fieldKey}
-                        >
-                          {field.label}
-                        </Label>
-                        {field.helper ? (
-                          <p className="text-sm leading-6 text-muted-foreground">
-                            {field.helper}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-4">
-                        <Textarea
-                          id={fieldKey}
-                          onChange={(event) =>
-                            updateField(field.id, event.target.value)
-                          }
-                          placeholder={field.placeholder}
-                          rows={field.rows ?? 5}
-                          value={fieldValue}
-                        />
-                      </div>
-
-                      <div className="mt-4">
-                        <VoiceDictationButton
-                          currentText={fieldValue}
-                          fieldId={field.id}
-                          fieldLabel={field.label}
-                          onTranscript={(text) => appendTranscript(field.id, text)}
-                          workbookId={workbook.id}
-                        />
-                      </div>
-
-                      {field.aiActions?.length ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {field.aiActions.map((action) => (
-                            <Button
-                              className="rounded-full"
-                              disabled={assistState?.loading}
-                              key={action}
-                              onClick={() => runAiAssist(field, action)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              {action === "clarify" && "Clarifier"}
-                              {action === "shorten" && "Raccourcir"}
-                              {action === "variants_3" && "3 variantes"}
-                              {action === "flag_vagueness" && "Repérer le flou"}
-                              {action === "oralize_30s" && "Version orale 30s"}
-                              {action === "oralize_60s" && "Version orale 1 min"}
-                            </Button>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {assistState?.output ? (
-                        <div className="mt-4 rounded-3xl border border-primary/15 bg-primary/5 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-primary/70">
-                            Suggestion IA
-                          </p>
-                          <div className="mt-2 text-sm leading-7 text-foreground [overflow-wrap:anywhere] [&_a]:font-medium [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:rounded-md [&_code]:bg-background/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[0.92em] [&_em]:italic [&_h1]:mt-5 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:text-primary [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-primary [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:font-semibold [&_h3]:text-primary [&_h3:first-child]:mt-0 [&_li]:ml-1 [&_li]:pl-1 [&_ol]:mt-3 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5 [&_p]:mt-3 [&_p:first-child]:mt-0 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:bg-background/85 [&_pre]:p-4 [&_pre]:text-xs [&_strong]:font-semibold [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {assistState.output}
-                            </ReactMarkdown>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <Button
-                              className="rounded-full"
-                              onClick={() =>
-                                updateField(field.id, assistState.output ?? "")
-                              }
-                              size="sm"
-                              type="button"
-                            >
-                              Remplacer mon texte
-                            </Button>
-                            <Button
-                              className="rounded-full"
-                              onClick={() =>
-                                copySuggestion(assistState.output ?? "")
-                              }
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              Copier la suggestion
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {assistState?.error ? (
-                        <p className="mt-3 text-sm text-destructive">
-                          {assistState.error}
-                        </p>
-                      ) : null}
-                    </article>
-                  );
-                })}
+                <div className="grid gap-6 xl:grid-cols-2">
+                  {inputFields.map((field) => renderField(field))}
+                </div>
+                {pitchField ? (
+                  renderField(pitchField, { alignActionsRight: true })
+                ) : null}
               </CardContent>
             </Card>
           </section>
@@ -475,7 +592,7 @@ export function PitchEditor({
                     Repere terrain
                   </Badge>
                   <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    Etape pitch
+                    Etape pitch commercial
                   </p>
                 </div>
                 <CardTitle className="editorial-title text-3xl text-primary">
@@ -496,40 +613,20 @@ export function PitchEditor({
 
                 <div className="space-y-3 rounded-2xl border border-border/80 bg-background/70 p-4">
                   <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                    Pitch 30 secondes
+                    Pitch commercial
                   </p>
                   <p className="text-sm leading-7 text-foreground">
-                    {shortPitch || "Ton pitch court apparaitra ici."}
+                    {commercialPitch || "Ton pitch commercial apparaitra ici."}
                   </p>
-                  {shortPitch ? (
+                  {commercialPitch ? (
                     <Button
                       className="rounded-full"
-                      onClick={() => copyPitch(shortPitch, "Pitch 30 secondes")}
+                      onClick={() => copyPitch(commercialPitch, "Pitch commercial")}
                       size="sm"
                       type="button"
                       variant="outline"
                     >
-                      Copier le pitch 30s
-                    </Button>
-                  ) : null}
-                </div>
-
-                <div className="space-y-3 rounded-2xl border border-border/80 bg-background/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                    Pitch 1 minute
-                  </p>
-                  <p className="text-sm leading-7 text-foreground">
-                    {longPitch || "Ta version orale une minute apparaitra ici."}
-                  </p>
-                  {longPitch ? (
-                    <Button
-                      className="rounded-full"
-                      onClick={() => copyPitch(longPitch, "Pitch 1 minute")}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      Copier le pitch 1 min
+                      Copier le pitch
                     </Button>
                   ) : null}
                 </div>

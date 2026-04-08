@@ -11,7 +11,7 @@ const aiRequestSchema = z.object({
   workbookId: z.string().min(1),
   stepId: z.string().min(1),
   action: z.enum(AI_ACTIONS),
-  sourceText: z.string().trim().min(1).max(4000),
+  sourceText: z.string().trim().min(1).max(8000),
   context: z.record(z.string(), z.string().optional()).optional(),
 });
 
