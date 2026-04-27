@@ -35,7 +35,10 @@ export async function GET(
     }
 
     const messages = await getUnreadCoachMessages(workbookId);
-    await markCoachMessagesSeen(messages.map((message) => message.id));
+    await markCoachMessagesSeen(
+      workbookId,
+      messages.map((message) => message.id),
+    );
 
     return NextResponse.json({
       ok: true,

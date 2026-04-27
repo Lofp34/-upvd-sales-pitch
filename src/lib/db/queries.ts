@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import crypto from "node:crypto";
+
+import { and, desc, eq } from "drizzle-orm";
 
 import {
-  coachMessages,
   participantWorkbooks,
   workshopSessions,
   type ParticipantWorkbookRecord,
@@ -19,6 +20,50 @@ export type WorkbookWithSession = {
   workbook: ParticipantWorkbookRecord;
   session: WorkshopSessionRecord;
 };
+
+export type StoredCoachMessage = {
+  id: string;
+  body: string;
+  createdAt: string;
+  seenAt: string | null;
+};
+
+type WorkbookFinalOutput = Record<string, unknown> & {
+  coachMessages?: unknown;
+};
+
+function getWorkbookFinalOutput(
+  finalOutputJson: Record<string, unknown> | null,
+): WorkbookFinalOutput {
+  if (
+    finalOutputJson &&
+    typeof finalOutputJson === "object" &&
+    !Array.isArray(finalOutputJson)
+  ) {
+    return finalOutputJson;
+  }
+
+  return {};
+}
+
+function getStoredCoachMessages(
+  finalOutputJson: Record<string, unknown> | null,
+) {
+  const output = getWorkbookFinalOutput(finalOutputJson);
+
+  if (!Array.isArray(output.coachMessages)) {
+    return [];
+  }
+
+  return output.coachMessages.filter(
+    (message): message is StoredCoachMessage =>
+      typeof message === "object" &&
+      message !== null &&
+      typeof (message as StoredCoachMessage).id === "string" &&
+      typeof (message as StoredCoachMessage).body === "string" &&
+      typeof (message as StoredCoachMessage).createdAt === "string",
+  );
+}
 
 export async function getRecentWorkshopSessions(limit = 5) {
   return getDb()
@@ -62,38 +107,78 @@ export async function createCoachMessage(input: {
     return null;
   }
 
-  const [message] = await getDb()
-    .insert(coachMessages)
-    .values({
-      workbookId: input.workbookId,
-      body: input.body.trim(),
-    })
-    .returning();
+  const output = getWorkbookFinalOutput(workbook.finalOutputJson);
+  const message: StoredCoachMessage = {
+    id: crypto.randomUUID(),
+    body: input.body.trim(),
+    createdAt: new Date().toISOString(),
+    seenAt: null,
+  };
+  const coachMessages = [
+    ...getStoredCoachMessages(workbook.finalOutputJson),
+    message,
+  ].slice(-50);
 
-  return message ?? null;
+  await getDb()
+    .update(participantWorkbooks)
+    .set({
+      finalOutputJson: {
+        ...output,
+        coachMessages,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(participantWorkbooks.id, input.workbookId));
+
+  return message;
 }
 
 export async function getUnreadCoachMessages(workbookId: string, limit = 5) {
-  return getDb()
-    .select()
-    .from(coachMessages)
-    .where(
-      and(eq(coachMessages.workbookId, workbookId), isNull(coachMessages.seenAt)),
-    )
-    .orderBy(asc(coachMessages.createdAt))
-    .limit(limit);
+  const workbook = await getWorkbookById(workbookId);
+
+  if (!workbook) {
+    return [];
+  }
+
+  return getStoredCoachMessages(workbook.finalOutputJson)
+    .filter((message) => !message.seenAt)
+    .slice(0, limit);
 }
 
-export async function markCoachMessagesSeen(messageIds: string[]) {
+export async function markCoachMessagesSeen(
+  workbookId: string,
+  messageIds: string[],
+) {
   if (messageIds.length === 0) {
     return [];
   }
 
-  return getDb()
-    .update(coachMessages)
-    .set({ seenAt: new Date() })
-    .where(inArray(coachMessages.id, messageIds))
-    .returning({ id: coachMessages.id });
+  const workbook = await getWorkbookById(workbookId);
+
+  if (!workbook) {
+    return [];
+  }
+
+  const output = getWorkbookFinalOutput(workbook.finalOutputJson);
+  const messageIdSet = new Set(messageIds);
+  const seenAt = new Date().toISOString();
+  const coachMessages = getStoredCoachMessages(workbook.finalOutputJson).map(
+    (message) =>
+      messageIdSet.has(message.id) ? { ...message, seenAt } : message,
+  );
+
+  await getDb()
+    .update(participantWorkbooks)
+    .set({
+      finalOutputJson: {
+        ...output,
+        coachMessages,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(participantWorkbooks.id, workbookId));
+
+  return messageIds.map((id) => ({ id }));
 }
 
 export async function createWorkshopSession(input: {
