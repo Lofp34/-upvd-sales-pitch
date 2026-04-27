@@ -16,16 +16,82 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import type { WorkshopSessionRecord } from "@/lib/db/schema";
 import { readResponsePayload } from "@/lib/http";
+import {
+  PITCH_CLIENT_ISSUES_FIELD_ID,
+  PITCH_COMMERCIAL_FIELD_ID,
+  PITCH_FIELDS,
+  PITCH_STEP_ID,
+  PITCH_STRENGTHS_FIELD_ID,
+} from "@/lib/pitch/config";
+import type { AnswersState } from "@/lib/workshop/types";
+
+type LearnerProduction = {
+  id: string;
+  answersJson: AnswersState;
+  currentStepId: string;
+  lastActiveLabel: string;
+  name: string;
+  sessionSlug: string;
+  sessionTitle: string;
+  startup: string;
+};
 
 type CoachWorkspaceProps = {
   authenticated: boolean;
   databaseReady: boolean;
+  learnerProductions: LearnerProduction[];
   recentSessions: WorkshopSessionRecord[];
 };
+
+function joinAnswerBlocks(...values: Array<string | undefined>) {
+  return values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n");
+}
+
+function getProductionFieldValue(
+  production: LearnerProduction,
+  fieldId: string,
+) {
+  const stepAnswers =
+    production.answersJson[PITCH_STEP_ID] ??
+    production.answersJson[production.currentStepId] ??
+    {};
+
+  if (fieldId === PITCH_STRENGTHS_FIELD_ID) {
+    return (
+      stepAnswers[PITCH_STRENGTHS_FIELD_ID] ??
+      joinAnswerBlocks(stepAnswers.valueResponse, stepAnswers.valueMethod)
+    );
+  }
+
+  if (fieldId === PITCH_COMMERCIAL_FIELD_ID) {
+    return (
+      stepAnswers[PITCH_COMMERCIAL_FIELD_ID] ??
+      stepAnswers.pitch60 ??
+      stepAnswers.pitch30 ??
+      ""
+    );
+  }
+
+  if (fieldId === PITCH_CLIENT_ISSUES_FIELD_ID) {
+    return stepAnswers[PITCH_CLIENT_ISSUES_FIELD_ID] ?? "";
+  }
+
+  return stepAnswers[fieldId] ?? "";
+}
+
+function countFilledFields(production: LearnerProduction) {
+  return PITCH_FIELDS.filter((field) =>
+    getProductionFieldValue(production, field.id).trim(),
+  ).length;
+}
 
 export function CoachWorkspace({
   authenticated,
   databaseReady,
+  learnerProductions,
   recentSessions,
 }: CoachWorkspaceProps) {
   const [accessCode, setAccessCode] = useState("");
@@ -137,8 +203,8 @@ export function CoachWorkspace({
               </h1>
               <p className="max-w-3xl text-base leading-7 text-muted-foreground">
                 L&apos;acces formateur sert a creer la session, generer le lien
-                participant et lancer rapidement un atelier centre sur le pitch
-                startup.
+                participant et suivre les productions sauvegardees pendant
+                l&apos;atelier pitch startup.
               </p>
             </div>
             {authenticated ? (
@@ -301,6 +367,90 @@ export function CoachWorkspace({
                       </div>
                     </div>
                   ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="editorial-card rounded-[2rem] lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="editorial-title text-3xl text-primary">
+                  Productions des apprenants
+                </CardTitle>
+                <CardDescription>
+                  Les dernieres sauvegardes affichees par apprenant, startup et
+                  session.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {learnerProductions.length === 0 ? (
+                  <p className="text-sm leading-7 text-muted-foreground">
+                    Aucune production sauvegardee pour l&apos;instant.
+                  </p>
+                ) : (
+                  learnerProductions.map((production) => {
+                    const filledFields = countFilledFields(production);
+
+                    return (
+                      <article
+                        className="rounded-3xl border border-border/80 bg-background/75 p-5"
+                        key={production.id}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-medium text-primary">
+                                {production.name}
+                              </h3>
+                              <Badge variant="outline">
+                                {production.startup}
+                              </Badge>
+                            </div>
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                              {production.sessionTitle} - /s/
+                              {production.sessionSlug} - Derniere activite :{" "}
+                              {production.lastActiveLabel}
+                            </p>
+                          </div>
+                          <Badge className="rounded-full bg-primary/10 text-primary">
+                            {filledFields}/{PITCH_FIELDS.length} blocs remplis
+                          </Badge>
+                        </div>
+
+                        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                          {PITCH_FIELDS.map((field) => {
+                            const value = getProductionFieldValue(
+                              production,
+                              field.id,
+                            ).trim();
+                            const isPitchField =
+                              field.id === PITCH_COMMERCIAL_FIELD_ID;
+
+                            return (
+                              <section
+                                className={`rounded-2xl border border-border/70 bg-card/70 p-4 ${
+                                  isPitchField ? "lg:col-span-2" : ""
+                                }`}
+                                key={field.id}
+                              >
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                  {field.label}
+                                </p>
+                                {value ? (
+                                  <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm leading-6 text-foreground/90">
+                                    {value}
+                                  </p>
+                                ) : (
+                                  <p className="mt-2 text-sm italic text-muted-foreground">
+                                    Non renseigne.
+                                  </p>
+                                )}
+                              </section>
+                            );
+                          })}
+                        </div>
+                      </article>
+                    );
+                  })
                 )}
               </CardContent>
             </Card>

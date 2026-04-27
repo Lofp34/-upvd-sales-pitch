@@ -27,6 +27,21 @@ export async function getRecentWorkshopSessions(limit = 5) {
     .limit(limit);
 }
 
+export async function getRecentWorkbookProductions(limit = 50) {
+  return getDb()
+    .select({
+      workbook: participantWorkbooks,
+      session: workshopSessions,
+    })
+    .from(participantWorkbooks)
+    .innerJoin(
+      workshopSessions,
+      eq(participantWorkbooks.sessionId, workshopSessions.id),
+    )
+    .orderBy(desc(participantWorkbooks.lastActiveAt))
+    .limit(limit);
+}
+
 export async function createWorkshopSession(input: {
   title: string;
   deckUrl?: string | null;
