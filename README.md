@@ -15,7 +15,8 @@ Application atelier concentree sur la redaction du pitch pour les startupers UPV
 ## Parcours produit
 
 - `/coach`
-  Espace formateur minimal pour ouvrir une session et recuperer le lien participant.
+  Espace formateur pour ouvrir une session, recuperer le lien participant,
+  consulter les productions et envoyer des conseils instantanes.
 - `/s/[slug]`
   Entree participant avec `nom + startup`.
 - `/s/[slug]/atelier`
@@ -40,7 +41,7 @@ Notes:
 - `OPENAI_API_KEY` reste strictement cote serveur.
 - `COACH_ACCESS_CODE` protege l'entree formateur.
 - `SESSION_COOKIE_SECRET` sert a signer le cookie coach.
-- Cette application est prevue pour reutiliser la meme base Neon que l'application atelier complete, mais avec des tables dediees: `pitch_sessions` et `pitch_workbooks`.
+- Cette application est prevue pour reutiliser la meme base Neon que l'application atelier complete, mais avec des tables dediees: `pitch_sessions`, `pitch_workbooks` et `pitch_coach_messages`.
 
 ## Demarrage local
 

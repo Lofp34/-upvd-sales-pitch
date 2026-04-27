@@ -58,5 +58,20 @@ export const participantWorkbooks = pgTable("pitch_workbooks", {
     .defaultNow(),
 });
 
+export const coachMessages = pgTable("pitch_coach_messages", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  workbookId: text("workbook_id")
+    .notNull()
+    .references(() => participantWorkbooks.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  seenAt: timestamp("seen_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type WorkshopSessionRecord = typeof workshopSessions.$inferSelect;
 export type ParticipantWorkbookRecord = typeof participantWorkbooks.$inferSelect;
+export type CoachMessageRecord = typeof coachMessages.$inferSelect;

@@ -1,6 +1,7 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import {
+  coachMessages,
   participantWorkbooks,
   workshopSessions,
   type ParticipantWorkbookRecord,
@@ -49,6 +50,50 @@ export async function deleteParticipantWorkbook(workbookId: string) {
     .returning({ id: participantWorkbooks.id });
 
   return deleted ?? null;
+}
+
+export async function createCoachMessage(input: {
+  workbookId: string;
+  body: string;
+}) {
+  const workbook = await getWorkbookById(input.workbookId);
+
+  if (!workbook) {
+    return null;
+  }
+
+  const [message] = await getDb()
+    .insert(coachMessages)
+    .values({
+      workbookId: input.workbookId,
+      body: input.body.trim(),
+    })
+    .returning();
+
+  return message ?? null;
+}
+
+export async function getUnreadCoachMessages(workbookId: string, limit = 5) {
+  return getDb()
+    .select()
+    .from(coachMessages)
+    .where(
+      and(eq(coachMessages.workbookId, workbookId), isNull(coachMessages.seenAt)),
+    )
+    .orderBy(asc(coachMessages.createdAt))
+    .limit(limit);
+}
+
+export async function markCoachMessagesSeen(messageIds: string[]) {
+  if (messageIds.length === 0) {
+    return [];
+  }
+
+  return getDb()
+    .update(coachMessages)
+    .set({ seenAt: new Date() })
+    .where(inArray(coachMessages.id, messageIds))
+    .returning({ id: coachMessages.id });
 }
 
 export async function createWorkshopSession(input: {

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { LoaderCircle, SendHorizontal, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import type { WorkshopSessionRecord } from "@/lib/db/schema";
 import { readResponsePayload } from "@/lib/http";
 import {
@@ -102,6 +103,11 @@ export function CoachWorkspace({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [productions, setProductions] = useState(learnerProductions);
+  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
+  const [messageStatuses, setMessageStatuses] = useState<
+    Record<string, string>
+  >({});
+  const [sendingMessageId, setSendingMessageId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingProductionId, setDeletingProductionId] = useState<
     string | null
@@ -232,6 +238,65 @@ export function CoachWorkspace({
       );
     } finally {
       setDeletingProductionId(null);
+    }
+  }
+
+  async function handleSendCoachMessage(production: LearnerProduction) {
+    const body = messageDrafts[production.id]?.trim() ?? "";
+
+    setError("");
+    setMessage("");
+
+    if (!body) {
+      setMessageStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        [production.id]: "Ecris un conseil avant de l'envoyer.",
+      }));
+      return;
+    }
+
+    setSendingMessageId(production.id);
+    setMessageStatuses((currentStatuses) => ({
+      ...currentStatuses,
+      [production.id]: "",
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/coach/workbooks/${production.id}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ body }),
+        },
+      );
+      const payload = await readResponsePayload<{ message?: string }>(response);
+
+      if (!response.ok) {
+        throw new Error(payload.message ?? "Message impossible a envoyer.");
+      }
+
+      setMessageDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [production.id]: "",
+      }));
+      setMessageStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        [production.id]:
+          "Message envoye. Il apparaitra dans quelques secondes.",
+      }));
+    } catch (caughtError) {
+      setMessageStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        [production.id]:
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Message impossible a envoyer.",
+      }));
+    } finally {
+      setSendingMessageId(null);
     }
   }
 
@@ -437,6 +502,9 @@ export function CoachWorkspace({
                     const filledFields = countFilledFields(production);
                     const deletePending = pendingDeleteId === production.id;
                     const deleting = deletingProductionId === production.id;
+                    const messageDraft = messageDrafts[production.id] ?? "";
+                    const messageStatus = messageStatuses[production.id];
+                    const sendingMessage = sendingMessageId === production.id;
 
                     return (
                       <article
@@ -497,6 +565,57 @@ export function CoachWorkspace({
                             </div>
                           </div>
                         </div>
+
+                        <form
+                          className="mt-5 rounded-2xl border border-primary/10 bg-primary/5 p-4"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            handleSendCoachMessage(production);
+                          }}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.16em] text-primary/70">
+                                Message instantane
+                              </p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                Le conseil apparait dans une bulle temporaire
+                                sur l&apos;ecran participant.
+                              </p>
+                            </div>
+                            <Button
+                              className="rounded-full"
+                              disabled={sendingMessage || !messageDraft.trim()}
+                              size="sm"
+                              type="submit"
+                            >
+                              {sendingMessage ? (
+                                <LoaderCircle className="size-3.5 animate-spin" />
+                              ) : (
+                                <SendHorizontal className="size-3.5" />
+                              )}
+                              Envoyer
+                            </Button>
+                          </div>
+                          <Textarea
+                            className="mt-3 min-h-20 bg-background/90"
+                            maxLength={500}
+                            onChange={(event) =>
+                              setMessageDrafts((currentDrafts) => ({
+                                ...currentDrafts,
+                                [production.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="Exemple : Commence par l'enjeu client avant de parler de ta solution."
+                            rows={2}
+                            value={messageDraft}
+                          />
+                          {messageStatus ? (
+                            <p className="mt-2 text-sm text-primary">
+                              {messageStatus}
+                            </p>
+                          ) : null}
+                        </form>
 
                         <div className="mt-5 grid gap-3 lg:grid-cols-2">
                           {PITCH_FIELDS.map((field) => {

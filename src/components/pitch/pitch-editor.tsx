@@ -1,5 +1,6 @@
 "use client";
 
+import { MessageCircle, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -44,6 +45,12 @@ type AssistState = {
   action?: AiAction;
   output?: string;
   error?: string;
+};
+
+type CoachMessage = {
+  id: string;
+  body: string;
+  createdAt: string;
 };
 
 function mergeAnswers(
@@ -137,8 +144,10 @@ export function PitchEditor({
   const [assistStates, setAssistStates] = useState<Record<string, AssistState>>(
     {},
   );
+  const [coachMessages, setCoachMessages] = useState<CoachMessage[]>([]);
   const hydratedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seenCoachMessageIdsRef = useRef<Set<string>>(new Set());
 
   const stepAnswers = answers[PITCH_STEP_ID] ?? {};
   const strengthsText = getStepFieldValue(
@@ -248,6 +257,72 @@ export function PitchEditor({
       }
     };
   }, [answers, workbook.id]);
+
+  useEffect(() => {
+    let stopped = false;
+    const messageTimeouts: Array<ReturnType<typeof setTimeout>> = [];
+
+    async function pollCoachMessages() {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/workbooks/${workbook.id}/coach-messages`,
+          {
+            cache: "no-store",
+          },
+        );
+        const payload = await readResponsePayload<{
+          messages?: CoachMessage[];
+        }>(response);
+        const incomingMessages = payload.messages ?? [];
+
+        if (!response.ok || stopped || incomingMessages.length === 0) {
+          return;
+        }
+
+        const freshMessages = incomingMessages.filter(
+          (message) => !seenCoachMessageIdsRef.current.has(message.id),
+        );
+
+        if (freshMessages.length === 0) {
+          return;
+        }
+
+        for (const message of freshMessages) {
+          seenCoachMessageIdsRef.current.add(message.id);
+          messageTimeouts.push(
+            setTimeout(() => {
+              setCoachMessages((visibleMessages) =>
+                visibleMessages.filter((item) => item.id !== message.id),
+              );
+            }, 12000),
+          );
+        }
+
+        setCoachMessages((currentMessages) => {
+          return [...currentMessages, ...freshMessages].slice(-3);
+        });
+      } catch {
+        // Messaging is helpful but should never interrupt the writing flow.
+      }
+    }
+
+    void pollCoachMessages();
+    const interval = setInterval(() => {
+      void pollCoachMessages();
+    }, 4000);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      for (const timeout of messageTimeouts) {
+        clearTimeout(timeout);
+      }
+    };
+  }, [workbook.id]);
 
   function updateField(fieldId: string, value: string) {
     setAnswers((previous) => ({
@@ -653,6 +728,46 @@ export function PitchEditor({
           </aside>
         </div>
       </div>
+      {coachMessages.length ? (
+        <div
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 flex w-[min(calc(100vw-2rem),26rem)] flex-col gap-3"
+        >
+          {coachMessages.map((message) => (
+            <div
+              className="animate-in slide-in-from-bottom-3 fade-in rounded-[1.5rem] border border-primary/15 bg-card/95 p-4 text-card-foreground shadow-[0_24px_80px_-34px_rgba(24,30,58,0.45)] backdrop-blur"
+              key={message.id}
+              role="status"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                    <MessageCircle className="size-4" />
+                  </span>
+                  <p className="text-xs uppercase tracking-[0.16em] text-primary/70">
+                    Conseil formateur
+                  </p>
+                </div>
+                <button
+                  aria-label="Fermer le conseil formateur"
+                  className="rounded-full p-1 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                  onClick={() =>
+                    setCoachMessages((visibleMessages) =>
+                      visibleMessages.filter((item) => item.id !== message.id),
+                    )
+                  }
+                  type="button"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                {message.body}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </main>
   );
 }
