@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageCircle, X } from "lucide-react";
+import { MessageCircle, Pin, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -145,9 +145,13 @@ export function PitchEditor({
     {},
   );
   const [coachMessages, setCoachMessages] = useState<CoachMessage[]>([]);
+  const [pinnedCoachMessageIds, setPinnedCoachMessageIds] = useState<
+    Set<string>
+  >(new Set());
   const hydratedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seenCoachMessageIdsRef = useRef<Set<string>>(new Set());
+  const pinnedCoachMessageIdsRef = useRef<Set<string>>(new Set());
 
   const stepAnswers = answers[PITCH_STEP_ID] ?? {};
   const strengthsText = getStepFieldValue(
@@ -295,6 +299,10 @@ export function PitchEditor({
           seenCoachMessageIdsRef.current.add(message.id);
           messageTimeouts.push(
             setTimeout(() => {
+              if (pinnedCoachMessageIdsRef.current.has(message.id)) {
+                return;
+              }
+
               setCoachMessages((visibleMessages) =>
                 visibleMessages.filter((item) => item.id !== message.id),
               );
@@ -323,6 +331,29 @@ export function PitchEditor({
       }
     };
   }, [workbook.id]);
+
+  function pinCoachMessage(messageId: string) {
+    setPinnedCoachMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.add(messageId);
+      pinnedCoachMessageIdsRef.current = nextIds;
+
+      return nextIds;
+    });
+  }
+
+  function closeCoachMessage(messageId: string) {
+    setCoachMessages((visibleMessages) =>
+      visibleMessages.filter((item) => item.id !== messageId),
+    );
+    setPinnedCoachMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(messageId);
+      pinnedCoachMessageIdsRef.current = nextIds;
+
+      return nextIds;
+    });
+  }
 
   function updateField(fieldId: string, value: string) {
     setAnswers((previous) => ({
@@ -734,37 +765,62 @@ export function PitchEditor({
           className="fixed bottom-4 right-4 z-50 flex w-[min(calc(100vw-2rem),26rem)] flex-col gap-3"
         >
           {coachMessages.map((message) => (
-            <div
-              className="animate-in slide-in-from-bottom-3 fade-in rounded-[1.5rem] border border-primary/15 bg-card/95 p-4 text-card-foreground shadow-[0_24px_80px_-34px_rgba(24,30,58,0.45)] backdrop-blur"
-              key={message.id}
-              role="status"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                    <MessageCircle className="size-4" />
-                  </span>
-                  <p className="text-xs uppercase tracking-[0.16em] text-primary/70">
-                    Conseil formateur
+            (() => {
+              const pinned = pinnedCoachMessageIds.has(message.id);
+
+              return (
+                <div
+                  className="animate-in slide-in-from-bottom-3 fade-in rounded-[1.5rem] border border-primary/15 bg-card/95 p-4 text-card-foreground shadow-[0_24px_80px_-34px_rgba(24,30,58,0.45)] backdrop-blur"
+                  key={message.id}
+                  role="status"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                        <MessageCircle className="size-4" />
+                      </span>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-primary/70">
+                          Conseil formateur
+                        </p>
+                        {pinned ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Message epingle
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                      <Button
+                        className="rounded-full"
+                        disabled={pinned}
+                        onClick={() => pinCoachMessage(message.id)}
+                        size="sm"
+                        type="button"
+                        variant={pinned ? "secondary" : "outline"}
+                      >
+                        <Pin className="size-3.5" />
+                        {pinned ? "Epingle" : "Epingler"}
+                      </Button>
+                      <Button
+                        aria-label="Fermer le conseil formateur"
+                        className="rounded-full"
+                        onClick={() => closeCoachMessage(message.id)}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <X className="size-3.5" />
+                        Fermer
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                    {message.body}
                   </p>
                 </div>
-                <button
-                  aria-label="Fermer le conseil formateur"
-                  className="rounded-full p-1 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-                  onClick={() =>
-                    setCoachMessages((visibleMessages) =>
-                      visibleMessages.filter((item) => item.id !== message.id),
-                    )
-                  }
-                  type="button"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">
-                {message.body}
-              </p>
-            </div>
+              );
+            })()
           ))}
         </div>
       ) : null}
