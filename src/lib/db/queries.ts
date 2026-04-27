@@ -42,6 +42,15 @@ export async function getRecentWorkbookProductions(limit = 50) {
     .limit(limit);
 }
 
+export async function deleteParticipantWorkbook(workbookId: string) {
+  const [deleted] = await getDb()
+    .delete(participantWorkbooks)
+    .where(eq(participantWorkbooks.id, workbookId))
+    .returning({ id: participantWorkbooks.id });
+
+  return deleted ?? null;
+}
+
 export async function createWorkshopSession(input: {
   title: string;
   deckUrl?: string | null;

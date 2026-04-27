@@ -1,5 +1,6 @@
 "use client";
 
+import { LoaderCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +101,11 @@ export function CoachWorkspace({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [productions, setProductions] = useState(learnerProductions);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingProductionId, setDeletingProductionId] = useState<
+    string | null
+  >(null);
   const [createdSession, setCreatedSession] = useState<{
     title: string;
     joinPath: string;
@@ -187,6 +193,46 @@ export function CoachWorkspace({
   async function handleLogout() {
     await fetch("/api/coach/login", { method: "DELETE" });
     window.location.reload();
+  }
+
+  async function handleDeleteProduction(production: LearnerProduction) {
+    setError("");
+    setMessage("");
+
+    if (pendingDeleteId !== production.id) {
+      setPendingDeleteId(production.id);
+      setMessage(
+        `Confirme la suppression de la sauvegarde de ${production.name}.`,
+      );
+      return;
+    }
+
+    setDeletingProductionId(production.id);
+
+    try {
+      const response = await fetch(`/api/coach/workbooks/${production.id}`, {
+        method: "DELETE",
+      });
+      const payload = await readResponsePayload<{ message?: string }>(response);
+
+      if (!response.ok) {
+        throw new Error(payload.message ?? "Suppression impossible.");
+      }
+
+      setProductions((currentProductions) =>
+        currentProductions.filter((item) => item.id !== production.id),
+      );
+      setPendingDeleteId(null);
+      setMessage(`Sauvegarde de ${production.name} supprimee.`);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Suppression impossible.",
+      );
+    } finally {
+      setDeletingProductionId(null);
+    }
   }
 
   return (
@@ -382,13 +428,15 @@ export function CoachWorkspace({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                {learnerProductions.length === 0 ? (
+                {productions.length === 0 ? (
                   <p className="text-sm leading-7 text-muted-foreground">
                     Aucune production sauvegardee pour l&apos;instant.
                   </p>
                 ) : (
-                  learnerProductions.map((production) => {
+                  productions.map((production) => {
                     const filledFields = countFilledFields(production);
+                    const deletePending = pendingDeleteId === production.id;
+                    const deleting = deletingProductionId === production.id;
 
                     return (
                       <article
@@ -411,9 +459,43 @@ export function CoachWorkspace({
                               {production.lastActiveLabel}
                             </p>
                           </div>
-                          <Badge className="rounded-full bg-primary/10 text-primary">
-                            {filledFields}/{PITCH_FIELDS.length} blocs remplis
-                          </Badge>
+                          <div className="flex flex-col items-start gap-2 sm:items-end">
+                            <Badge className="rounded-full bg-primary/10 text-primary">
+                              {filledFields}/{PITCH_FIELDS.length} blocs remplis
+                            </Badge>
+                            <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
+                              <Button
+                                className="rounded-full"
+                                disabled={deleting}
+                                onClick={() => handleDeleteProduction(production)}
+                                size="sm"
+                                type="button"
+                                variant="destructive"
+                              >
+                                {deleting ? (
+                                  <LoaderCircle className="size-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="size-3.5" />
+                                )}
+                                {deletePending ? "Confirmer" : "Supprimer"}
+                              </Button>
+                              {deletePending ? (
+                                <Button
+                                  className="rounded-full"
+                                  disabled={deleting}
+                                  onClick={() => {
+                                    setPendingDeleteId(null);
+                                    setMessage("");
+                                  }}
+                                  size="sm"
+                                  type="button"
+                                  variant="outline"
+                                >
+                                  Annuler
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
 
                         <div className="mt-5 grid gap-3 lg:grid-cols-2">
