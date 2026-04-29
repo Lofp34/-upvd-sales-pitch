@@ -4,6 +4,7 @@ export const AI_ACTIONS = [
   "shorten",
   "variants_3",
   "flag_vagueness",
+  "raise_stakes",
   "oralize_30s",
   "oralize_60s",
 ] as const;

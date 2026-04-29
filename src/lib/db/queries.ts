@@ -14,6 +14,11 @@ import {
   generateSessionSlug,
   hashOpaqueToken,
 } from "@/lib/crypto";
+import {
+  createDefaultPitchWorkflow,
+  getFinalOutputObject,
+  type PitchPersona,
+} from "@/lib/pitch/workflow";
 import type { AnswersState } from "@/lib/workshop/types";
 
 export type WorkbookWithSession = {
@@ -35,15 +40,7 @@ type WorkbookFinalOutput = Record<string, unknown> & {
 function getWorkbookFinalOutput(
   finalOutputJson: Record<string, unknown> | null,
 ): WorkbookFinalOutput {
-  if (
-    finalOutputJson &&
-    typeof finalOutputJson === "object" &&
-    !Array.isArray(finalOutputJson)
-  ) {
-    return finalOutputJson;
-  }
-
-  return {};
+  return getFinalOutputObject(finalOutputJson);
 }
 
 function getStoredCoachMessages(
@@ -225,6 +222,8 @@ export async function createParticipantWorkbook(input: {
   sessionId: string;
   name: string;
   startup: string;
+  email?: string;
+  persona?: PitchPersona;
 }) {
   const resumeToken = createOpaqueToken();
 
@@ -235,6 +234,12 @@ export async function createParticipantWorkbook(input: {
       name: input.name.trim(),
       startup: input.startup.trim(),
       resumeTokenHash: hashOpaqueToken(resumeToken),
+      finalOutputJson: {
+        pitchWorkflow: createDefaultPitchWorkflow({
+          email: input.email,
+          persona: input.persona,
+        }),
+      },
     })
     .returning();
 
@@ -296,12 +301,19 @@ export async function saveWorkbookState(input: {
     return null;
   }
 
+  const nextFinalOutputJson = input.finalOutputJson
+    ? {
+        ...getWorkbookFinalOutput(existing.finalOutputJson),
+        ...getFinalOutputObject(input.finalOutputJson),
+      }
+    : existing.finalOutputJson ?? null;
+
   const [updated] = await getDb()
     .update(participantWorkbooks)
     .set({
       answersJson: input.answersJson,
       currentStepId: input.currentStepId,
-      finalOutputJson: input.finalOutputJson ?? existing.finalOutputJson ?? null,
+      finalOutputJson: nextFinalOutputJson,
       lastActiveAt: new Date(),
       updatedAt: new Date(),
     })

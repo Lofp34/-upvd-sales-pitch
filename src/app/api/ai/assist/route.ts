@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     previousRequests.push(now);
     aiRateLimit.set(access.workbook.id, previousRequests);
 
-    const output = await assistWithAi({
+    const result = await assistWithAi({
       action: parsed.data.action,
       stepId: parsed.data.stepId,
       sourceText: parsed.data.sourceText,
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      output,
+      ...result,
     });
   } catch (error) {
     return toApiErrorResponse(

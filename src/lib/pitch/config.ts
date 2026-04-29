@@ -28,7 +28,13 @@ export const PITCH_FIELDS: WorkshopField[] = [
       "Decrivez les attentes de haut niveau, les tensions, les priorites, les risques ou les blocages reellement ressentis par vos interlocuteurs...",
     kind: "textarea",
     rows: 6,
-    aiActions: ["clarify", "shorten", "flag_vagueness", "variants_3"],
+    aiActions: [
+      "clarify",
+      "shorten",
+      "flag_vagueness",
+      "raise_stakes",
+      "variants_3",
+    ],
   },
   {
     id: PITCH_COMMERCIAL_FIELD_ID,

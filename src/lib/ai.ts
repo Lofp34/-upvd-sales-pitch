@@ -10,6 +10,15 @@ type AssistInput = {
   context?: Record<string, string | undefined>;
 };
 
+export type AiAssistCard = {
+  question: string;
+};
+
+export type AiAssistResult = {
+  output: string;
+  cards?: AiAssistCard[];
+};
+
 const ACTION_PROMPTS: Record<
   AiAction,
   { instruction: string; outputShape: string }
@@ -38,9 +47,15 @@ const ACTION_PROMPTS: Record<
   },
   flag_vagueness: {
     instruction:
-      "Signale ce qui reste vague, flou, non prouve ou trop generique dans le texte.",
+      "Signale ce qui reste vague, flou, non prouve ou trop generique dans le texte. Transforme chaque flou en question courte et actionnable pour aider l'apprenant a repondre point par point.",
     outputShape:
-      "Retourne deux parties courtes : 'Ce qui reste flou' puis 'Ce qu'il faut preciser'.",
+      "Retourne uniquement un JSON strict avec la forme {\"summary\":\"synthese courte\",\"cards\":[{\"question\":\"question a clarifier\"}]}. Maximum 5 cartes.",
+  },
+  raise_stakes: {
+    instruction:
+      "Rehausse le niveau d'enjeu sans inventer : transforme les formulations fonctionnelles en consequences metier, risques, couts, responsabilite, confiance, impact humain, decision ou image.",
+    outputShape:
+      "Retourne un seul texte retravaille, directement reutilisable, qui formule au moins un enjeu fort avant toute solution.",
   },
   oralize_30s: {
     instruction:
@@ -72,15 +87,96 @@ function getClient() {
   });
 }
 
+function stripJsonFence(text: string) {
+  return text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function tryParseJsonObject(text: string) {
+  const stripped = stripJsonFence(text);
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(stripped.slice(start, end + 1));
+
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function fallbackCardsFromText(text: string): AiAssistCard[] {
+  return text
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^[-*\d.)\s]+/, "")
+        .replace(/^ce qu'il faut preciser\s*:?\s*/i, "")
+        .replace(/^ce qui reste flou\s*:?\s*/i, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 18)
+    .slice(0, 5)
+    .map((question) => ({ question }));
+}
+
+function parseVaguenessResult(text: string): AiAssistResult {
+  const parsed = tryParseJsonObject(text);
+
+  if (!parsed) {
+    return {
+      output: text,
+      cards: fallbackCardsFromText(text),
+    };
+  }
+
+  const summary =
+    typeof parsed.summary === "string" ? parsed.summary.trim() : text.trim();
+  const cards = Array.isArray(parsed.cards)
+    ? parsed.cards
+        .map((card) => {
+          if (!card || typeof card !== "object") {
+            return null;
+          }
+
+          const question = (card as { question?: unknown }).question;
+
+          return typeof question === "string" && question.trim()
+            ? { question: question.trim() }
+            : null;
+        })
+        .filter((card): card is AiAssistCard => Boolean(card))
+        .slice(0, 5)
+    : [];
+
+  return {
+    output: summary || "Points a clarifier generes.",
+    cards,
+  };
+}
+
 export async function assistWithAi({
   action,
   stepId,
   sourceText,
   context = {},
-}: AssistInput) {
+}: AssistInput): Promise<AiAssistResult> {
   const configuration = ACTION_PROMPTS[action];
   const isPitchGeneration = action === "generate_pitch";
   const isPitchField = context.fieldLabel === "Pitch commercial 1 minute max";
+  const isRaiseStakes = action === "raise_stakes";
 
   const contextBlock = Object.entries(context)
     .filter(([, value]) => Boolean(value))
@@ -109,6 +205,13 @@ export async function assistWithAi({
     systemInstructions.push(
       "Si le texte travaille un pitch commercial, conserve la logique enjeux clients -> forces -> benefices.",
       "Reste dans un format fluide, directement prononcable, sans puces ni titre.",
+    );
+  }
+
+  if (isRaiseStakes) {
+    systemInstructions.push(
+      "Ne confonds jamais enjeu et fonctionnalite.",
+      "Si l'information est insuffisante, reste prudent et formule l'enjeu comme hypothese a verifier.",
     );
   }
 
@@ -160,5 +263,9 @@ export async function assistWithAi({
     throw new Error("L'assistant IA n'a retourne aucun texte.");
   }
 
-  return output;
+  if (action === "flag_vagueness") {
+    return parseVaguenessResult(output);
+  }
+
+  return { output };
 }

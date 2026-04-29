@@ -10,10 +10,13 @@ import {
   createParticipantWorkbook,
   getWorkshopSessionBySlug,
 } from "@/lib/db/queries";
+import { PITCH_PERSONAS } from "@/lib/pitch/workflow";
 
 const joinSchema = z.object({
   name: z.string().min(2, "Le nom est requis."),
   startup: z.string().min(2, "Le nom de la startup est requis."),
+  email: z.string().email("Email invalide.").optional().or(z.literal("")),
+  persona: z.enum(PITCH_PERSONAS).optional(),
 });
 
 type SessionJoinContext = {
@@ -48,6 +51,8 @@ export async function POST(request: NextRequest, context: SessionJoinContext) {
       sessionId: session.id,
       name: parsed.data.name,
       startup: parsed.data.startup,
+      email: parsed.data.email || undefined,
+      persona: parsed.data.persona ?? "founder",
     });
 
     const response = NextResponse.json({
